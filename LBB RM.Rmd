@@ -1,0 +1,184 @@
+---
+title: "Crime Rate Prediction Linear Regression"
+author: "Bayu Raka Janasri"
+date: "6/17/2021"
+output:
+  html_document:
+    theme: flatly
+    higlight: zenburn
+    toc: true
+    toc_float:
+      collapsed: true
+    df_print: paged
+    number_sections : True
+---
+
+![](crime.jpeg)
+
+# Introduction
+  
+  We will make crime rate prediction using linear regression model to see what are important variabel.
+
+# Setup Library
+```{r, message=FALSE}
+library(tidyverse)
+library(caret)
+library(GGally)
+library(car)
+library(lmtest)
+```
+
+# Load dataset
+```{r}
+crime <- read.csv("crime.csv")
+glimpse(crime)
+```
+**Check missing value**
+```{r}
+colSums(is.na(crime))
+```
+There is no missing value at our dataset.
+
+# Explaratory Data Analysis
+
+Exploratory data analysis is a phase where we explore the data variables, see if there are any pattern that can indicate any kind of correlation between variables.
+
+## Check Correlation
+
+```{r}
+ggcorr(crime, label = T, label_size = 3, hjust = 1, layout.exp = 2)
+```
+
+The graphic show that not many good correlation with `crime_rate`, we can mention some strong correlations like **police_exp59, police_60, gdp, and mean_education**.
+
+# Modelling
+
+## Linear Regression
+
+Now we will try to model the linear regression using `crime_rate` as the target variable.
+
+```{r}
+set.seed(100)
+crime_lm <- lm(crime_rate ~. , data = crime)
+summary(crime_lm)
+```
+From the result above our **R-squared 0.7078** , but we can choose only significant column, it's shown by p-value < 0.05 or the easy way is by looking the star (*). We will save column `police_exp60` and `inequality`.
+
+**Choose significant column**
+```{r}
+crime2 <- crime  %>% 
+          select(c(police_exp60, inequality, crime_rate))
+```
+
+**Create second linear regession model**
+```{r}
+set.seed(100)
+crime_lm2 <- lm(crime_rate ~., data = crime2)
+summary(crime_lm2)
+```
+Our result with significant column is not quite good so far, our **R-squared is 0.5612** the value is lower than the first one.
+
+## Stepwise
+
+We make another model to get good R-squared, at this time we try `stepwise` model with direction `both`.
+
+**First stepwise model with all column**
+```{r}
+set.seed(100)
+crime_step <- stats::step(crime_lm, direction = "both", trace = 0)
+
+summary(crime_step)
+```
+**Second stepwise model with significant column**
+
+```{r}
+set.seed(100)
+crime_step2 <- stats::step(crime_lm2, direction = "both", trace = 0)
+
+summary(crime_step2)
+```
+Based on our result of two models above. We can see the value of `R-squared`, our first model `R-squared` is **0.7444** and the second one is **0.5612**. The first model is better than second model eventhough the second one with significant column. We will keep first model `stepwise` as our best model.
+
+# Evaluation
+
+## Model Performance
+
+We use `RMSE` to see our model performance. `RMSE` is better than `MAE` or mean absolute error, because `RMSE` squared the difference between the actual values and the predicted values, meaning that prediction with higher error will be penalized greatly. This metric is often used to compare two or more alternative models, even though it is harder to interpret than `MAE`.
+
+**Stepwise performance**
+```{r}
+RMSE(crime_step$fitted.values, crime$crime_rate)
+```
+
+**Linear Regression performance**
+```{r}
+RMSE(crime_lm$fitted.values, crime$crime_rate)
+```
+From RMSE calculation we get `stepwise` performance **175.8304** and `linear regression` performance **169.7918** . `linear regression` performance is better than `stepwise`.
+
+# Assumptions
+
+After making some models, we have to check assumptions from our model. Here some assumptions :  
+
+## Linearity
+
+The linear regression model assumes that there is a straight-line relationship between the predictors and the response. If the true relationship is far from linear, then virtually all of the conclusions that we draw from the fit are suspect. In addition, the prediction accuracy of the model can be significantly reduced.
+
+```{r}
+data.frame(residual = crime_step$residuals, fitted = crime_step$fitted.values) %>%
+  ggplot(aes(fitted, residual)) + 
+  geom_point() + 
+  geom_smooth() + 
+  geom_hline(aes(yintercept = 0)) + 
+  theme(panel.grid = element_blank(), panel.background = element_blank())
+```
+
+Based on `ggcor` and `fitted values`, it can be seen that the relationship between the target and the predictors is quite strong, even though there are some predictors that are not very strongly correlated with the target.
+
+## Normality
+
+The second assumption in linear regression is that the residuals follow normal distribution. We can easily check this by using the Saphiro-Wilk normality test.
+
+```{r}
+shapiro.test(crime_step$residuals)
+```
+**p-value > 0.05** that means our model have normal distribution. We can see from plot below.
+
+```{r}
+qqPlot(crime_step$residuals)
+```
+
+## Autocorrelation
+
+The standard errors that are computed for the estimated regression coefficients or the fitted values are based on the assumption of uncorrelated error terms (no autocorrelation). If in fact there is correlation among the error terms, then the estimated standard errors will tend to underestimate the true standard errors. As a result, confidence and prediction intervals will be narrower than they should be. For example, a 95% confidence interval may in reality have a much lower probability than 0.95 of containing the true value of the parameter. In addition, p-values associated with the model will be lower than they should be; this could cause us to erroneously conclude that a parameter is statistically significant. In short, if the error terms are correlated, we may have an unwarranted sense of confidence in our model.
+
+Autocorrelation can be detected using the **durbin watson test**, with null hypothesis that there is no autocorrelation.
+
+```{r}
+durbinWatsonTest(crime_step)
+```
+
+**p-value > 0.05**, we can conclude autocorrelation is not present.
+
+## Heteroscedasticity
+
+Heteroscedasticity is a condition where the variability of a variable is unequal across its range of value. In a linear regression model, if the variance of its error is showing unequal variation across the target variable range, it shows that heteroscedasticity is present and the implication to that is related to the previous statement of a non-random pattern in residual
+
+```{r}
+bptest(crime_step)
+```
+**p-value > 0.05** that means our model is not `heteroscedasticity` but `homocesdasticity`.
+
+## Multicolinearity
+
+Multicollinearity mean that there is a correlation between the independent variables/predictors. To check the multicollinearity, we can measure the varianec inflation factor (VIF). As a rule of thumb, a VIF value that exceeds 5 or 10 indicates a problematic amount of collinearity.
+
+```{r}
+vif(crime_step)
+```
+Based on result our dataset is `multicolinearity` because there is no value greater than 5.
+
+# Conclusion
+
+Variables that are useful to describe the variances in `crime_rate` are `percent_m`, `mean_education`, `police_exp60`, `m_per1000f`, `unemployment_m24`, `unemployment_m39`, `inequality`, `prob_prison`. Our final model has satisfied the classical assumptions. The `Adjusted R-squared` of the model is quite good, with **74.44%** of the variables can explain the variances in the car price. The accuracy of the model in predicting the crime rate is measured with `RMSE`, our `RMSE` result is **175.8304**. Based on assumption test our model can be used to predict `crime_rate`. 
+
